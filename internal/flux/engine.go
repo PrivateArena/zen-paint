@@ -90,13 +90,13 @@ func (e *Engine) Initialize(modelDir string, opts engine.Options) error {
 			fmt.Println("[ort] Enabled ROCm GPU execution provider")
 		}
 	case "cuda":
-		cudaOpts, err := ort.NewCUDAProviderOptions()
-		if err == nil {
+		cudaOpts, cudaErr := ort.NewCUDAProviderOptions()
+		if cudaErr == nil {
 			defer cudaOpts.Destroy()
-			err = sessOpts.AppendExecutionProviderCUDA(cudaOpts)
+			cudaErr = sessOpts.AppendExecutionProviderCUDA(cudaOpts)
 		}
-		if err != nil {
-			fmt.Printf("[ort] Warning: failed to append CUDA provider: %v. Using CPU fallback.\n", err)
+		if cudaErr != nil {
+			fmt.Printf("[ort] Warning: failed to append CUDA provider: %v. Using CPU fallback.\n", cudaErr)
 		} else {
 			fmt.Println("[ort] Enabled CUDA GPU execution provider")
 		}

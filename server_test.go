@@ -9,14 +9,13 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"zen-paint/internal/engine"
 )
 
 type mockEngine struct {
-	mu   sync.Mutex
-	busy bool
+	started chan struct{}
+	resume  chan struct{}
 }
 
 func (m *mockEngine) Initialize(modelDir string, opts engine.Options) error {
@@ -24,17 +23,15 @@ func (m *mockEngine) Initialize(modelDir string, opts engine.Options) error {
 }
 
 func (m *mockEngine) Generate(req engine.GenerateRequest) (engine.GenerateResult, error) {
-	m.mu.Lock()
-	m.busy = true
-	m.mu.Unlock()
-
-	// simulate some work
-	time.Sleep(100 * time.Millisecond)
-
-	m.mu.Lock()
-	m.busy = false
-	m.mu.Unlock()
-
+	if m.started != nil {
+		select {
+		case m.started <- struct{}{}:
+		default:
+		}
+	}
+	if m.resume != nil {
+		<-m.resume
+	}
 	return engine.GenerateResult{
 		ImagePath:  "test.png",
 		DurationMs: 100,
@@ -77,10 +74,16 @@ func TestServerRoutesAndConcurrency(t *testing.T) {
 		MaxConcurrency:    1,
 	}
 
+	startedChan := make(chan struct{}, 1)
+	resumeChan := make(chan struct{})
+
 	// Set global config
 	globalCfg = cfg
 	generateSem = make(chan struct{}, cfg.MaxConcurrency)
-	activeEngine = &mockEngine{}
+	activeEngine = &mockEngine{
+		started: startedChan,
+		resume:  resumeChan,
+	}
 	activeModel = "test-model"
 
 	mux := http.NewServeMux()
@@ -119,7 +122,7 @@ func TestServerRoutesAndConcurrency(t *testing.T) {
 
 	// 3. Test generate concurrency limit (429)
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
 	codes := make([]int, 2)
 	reqBody, _ := json.Marshal(engine.GenerateRequest{
@@ -129,7 +132,7 @@ func TestServerRoutesAndConcurrency(t *testing.T) {
 		Steps:  4,
 	})
 
-	// Fire first request
+	// Fire first request asynchronously (blocks inside Generate)
 	go func() {
 		defer wg.Done()
 		reqGen, _ := http.NewRequest("POST", "/generate", bytes.NewBuffer(reqBody))
@@ -138,25 +141,23 @@ func TestServerRoutesAndConcurrency(t *testing.T) {
 		codes[0] = rrGen.Code
 	}()
 
-	// Wait briefly to ensure first request has entered generateSem but not finished
-	time.Sleep(20 * time.Millisecond)
+	// Wait deterministically for first request to enter Generate
+	<-startedChan
 
-	// Fire second request (should get 429)
-	go func() {
-		defer wg.Done()
-		reqGen, _ := http.NewRequest("POST", "/generate", bytes.NewBuffer(reqBody))
-		rrGen := httptest.NewRecorder()
-		mux.ServeHTTP(rrGen, reqGen)
-		codes[1] = rrGen.Code
-	}()
+	// Fire second request synchronously (should get 429 immediately)
+	reqGen, _ := http.NewRequest("POST", "/generate", bytes.NewBuffer(reqBody))
+	rrGen := httptest.NewRecorder()
+	mux.ServeHTTP(rrGen, reqGen)
+	codes[1] = rrGen.Code
 
+	// Resume and wait for the first request
+	close(resumeChan)
 	wg.Wait()
 
 	// One should be 200, the other should be 429
-	if (codes[0] == http.StatusOK && codes[1] == http.StatusTooManyRequests) ||
-		(codes[1] == http.StatusOK && codes[0] == http.StatusTooManyRequests) {
+	if codes[0] == http.StatusOK && codes[1] == http.StatusTooManyRequests {
 		// Pass!
 	} else {
-		t.Errorf("expected one 200 and one 429 response, got codes %v", codes)
+		t.Errorf("expected codes [200 429], got %v", codes)
 	}
 }

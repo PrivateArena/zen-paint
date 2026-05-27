@@ -215,20 +215,20 @@ func getPairs(word []string) []Pair {
 
 func bytesToUnicode() map[byte]rune {
 	b2u := make(map[byte]rune)
-	for b := int('!'); b <= int('~'); b++ {
+	for b := 33; b <= 126; b++ {
 		b2u[byte(b)] = rune(b)
 	}
-	for b := int('¡'); b <= int('¬'); b++ {
+	for b := 161; b <= 172; b++ {
 		b2u[byte(b)] = rune(b)
 	}
-	for b := int('®'); b <= int('ÿ'); b++ {
+	for b := 174; b <= 255; b++ {
 		b2u[byte(b)] = rune(b)
 	}
 	n := 0
 	for b := 0; b < 256; b++ {
-		inRange1 := (b >= int('!') && b <= int('~'))
-		inRange2 := (b >= int('¡') && b <= int('¬'))
-		inRange3 := (b >= int('®') && b <= int('ÿ'))
+		inRange1 := (b >= 33 && b <= 126)
+		inRange2 := (b >= 161 && b <= 172)
+		inRange3 := (b >= 174 && b <= 255)
 		if !inRange1 && !inRange2 && !inRange3 {
 			b2u[byte(b)] = rune(256 + n)
 			n++
