@@ -1,0 +1,25 @@
+# zen-paint
+
+# binaries
+zen-paint
+zenpaint
+
+# model weights (large files — place in models/<name>/)
+models/**/*.onnx
+models/**/*.safetensors
+models/**/*.bin
+models/**/*.pt
+
+# generated outputs
+/tmp/zen-paint/
+
+# ORT shared library (symlink or copy from zen-tts)
+piper/
+
+# test artifacts
+*.png
+*.wav
+
+# build artifacts
+*.prof
+*.log

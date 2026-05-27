@@ -1,0 +1,15 @@
+{
+  "name": "bonsai-ternary",
+  "architecture": "flux",
+  "files": {
+    "text_encoder": "text_encoder.onnx",
+    "text_encoder_2": "text_encoder_2.onnx",
+    "transformer": "transformer.onnx",
+    "vae_decoder": "vae_decoder.onnx"
+  },
+  "default_steps": 4,
+  "default_cfg": 1.0,
+  "max_width": 1024,
+  "max_height": 1024,
+  "description": "Bonsai Image 4B ternary (1.58-bit, 1.21GB): FLUX.2 Klein MMDiT, high quality"
+}

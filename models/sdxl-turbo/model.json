@@ -1,0 +1,14 @@
+{
+  "name": "sdxl-turbo",
+  "architecture": "sdxl",
+  "files": {
+    "text_encoder": "text_encoder.onnx",
+    "unet": "unet.onnx",
+    "vae_decoder": "vae_decoder.onnx"
+  },
+  "default_steps": 4,
+  "default_cfg": 0.0,
+  "max_width": 512,
+  "max_height": 512,
+  "description": "SDXL-Turbo: 4-step distilled, 512x512, general purpose, fast CPU generation"
+}

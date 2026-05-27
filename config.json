@@ -1,0 +1,8 @@
+{
+  "port": 7890,
+  "default_model": "sdxl-turbo",
+  "execution_provider": "cpu",
+  "num_threads": 0,
+  "output_dir": "/tmp/zen-paint",
+  "ort_lib_path": ""
+}
