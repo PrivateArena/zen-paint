@@ -15,6 +15,7 @@ type Config struct {
 	NumThreads        int    `json:"num_threads"`
 	OutputDir         string `json:"output_dir"`
 	OrtLibPath        string `json:"ort_lib_path"`
+	MaxConcurrency    int    `json:"max_concurrency"`
 }
 
 var defaultConfig = Config{
@@ -24,6 +25,7 @@ var defaultConfig = Config{
 	NumThreads:        0,
 	OutputDir:         "/tmp/zen-paint",
 	OrtLibPath:        "",
+	MaxConcurrency:    1,
 }
 
 // LoadConfig reads config.json from the given path.

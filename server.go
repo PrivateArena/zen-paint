@@ -20,6 +20,7 @@ var (
 	serverMu       sync.Mutex
 	serverActive   bool
 	globalCfg      Config
+	generateSem    chan struct{}
 )
 
 // --- SERVER LIFECYCLE ---
@@ -38,11 +39,17 @@ func StartServer(cfg Config) {
 		return
 	}
 
+	if cfg.MaxConcurrency <= 0 {
+		cfg.MaxConcurrency = 1
+	}
+	generateSem = make(chan struct{}, cfg.MaxConcurrency)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", statusHandler)
 	mux.HandleFunc("/models", modelsHandler)
 	mux.HandleFunc("/load", loadHandler)
 	mux.HandleFunc("/generate", generateHandler)
+	mux.Handle("/outputs/", http.StripPrefix("/outputs/", http.FileServer(http.Dir(cfg.OutputDir))))
 
 	serverSrv = &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -191,6 +198,14 @@ func generateHandler(w http.ResponseWriter, r *http.Request) {
 	var req engine.GenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]any{"error": "bad JSON"})
+		return
+	}
+
+	select {
+	case generateSem <- struct{}{}:
+		defer func() { <-generateSem }()
+	default:
+		writeJSON(w, 429, map[string]any{"error": "server busy: max generation concurrency reached"})
 		return
 	}
 

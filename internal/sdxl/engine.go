@@ -27,10 +27,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	ort "github.com/yalue/onnxruntime_go"
 	zenort "zen-paint/internal/ort"
+	"zen-paint/internal/tokenizer"
 
 	"zen-paint/internal/engine"
 )
@@ -40,6 +42,7 @@ type Engine struct {
 	textEncoder *ort.DynamicAdvancedSession
 	unet        *ort.DynamicAdvancedSession
 	vaeDecoder  *ort.DynamicAdvancedSession
+	tokenizer   *tokenizer.ClipTokenizer
 	opts        engine.Options
 	modelDir    string
 	info        string
@@ -69,10 +72,42 @@ func (e *Engine) Initialize(modelDir string, opts engine.Options) error {
 	_ = sessOpts.SetIntraOpNumThreads(threads)
 	_ = sessOpts.SetInterOpNumThreads(1)
 
-	// TODO: ROCm EP for Ryzen AI MAX 395+
-	// if opts.ExecutionProvider == "rocm" {
-	//     _ = sessOpts.AppendExecutionProviderROCM(...)
-	// }
+	switch strings.ToLower(opts.ExecutionProvider) {
+	case "rocm", "hip":
+		err = sessOpts.AppendExecutionProvider("ROCM", map[string]string{
+			"device_id": "0",
+		})
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append ROCm provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled ROCm GPU execution provider")
+		}
+	case "cuda":
+		cudaOpts, err := ort.NewCUDAProviderOptions()
+		if err == nil {
+			defer cudaOpts.Destroy()
+			err = sessOpts.AppendExecutionProviderCUDA(cudaOpts)
+		}
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append CUDA provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled CUDA GPU execution provider")
+		}
+	case "directml":
+		err = sessOpts.AppendExecutionProviderDirectML(0)
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append DirectML provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled DirectML GPU execution provider")
+		}
+	case "openvino":
+		err = sessOpts.AppendExecutionProviderOpenVINO(nil)
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append OpenVINO provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled OpenVINO execution provider")
+		}
+	}
 
 	load := func(name string) (*ort.DynamicAdvancedSession, error) {
 		path := filepath.Join(modelDir, name)
@@ -102,6 +137,11 @@ func (e *Engine) Initialize(modelDir string, opts engine.Options) error {
 	}
 	if e.vaeDecoder, err = load("vae_decoder.onnx"); err != nil {
 		return err
+	}
+
+	e.tokenizer, err = tokenizer.NewClipTokenizer(modelDir)
+	if err != nil {
+		return fmt.Errorf("tokenizer: %w", err)
 	}
 
 	e.info = fmt.Sprintf("SDXL pipeline | dir=%s threads=%d provider=%s",
@@ -186,7 +226,7 @@ func (e *Engine) Close() error {
 // Returns (sequence_embeddings [1, 77, 768], pooled [1, 768]).
 // Uses a placeholder identity tokenizer — swap with BPE for production.
 func (e *Engine) encodeText(prompt string) ([]float32, []float32, error) {
-	tokens := simpleTokenize(prompt, 77)
+	tokens := e.tokenizer.Encode(prompt, 77)
 	tokenTensor, err := ort.NewTensor(ort.NewShape(1, 77), tokens)
 	if err != nil {
 		return nil, nil, err

@@ -26,10 +26,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	ort "github.com/yalue/onnxruntime_go"
 	zenort "zen-paint/internal/ort"
+	"zen-paint/internal/tokenizer"
 
 	"zen-paint/internal/engine"
 )
@@ -43,13 +45,15 @@ const (
 
 // Engine is the Bonsai/FLUX MMDiT backend.
 type Engine struct {
-	clipEncoder *ort.DynamicAdvancedSession // CLIP-L/14
-	t5Encoder   *ort.DynamicAdvancedSession // T5-XXL
-	transformer *ort.DynamicAdvancedSession // DiT 25-block
-	vaeDecoder  *ort.DynamicAdvancedSession
-	opts        engine.Options
-	modelDir    string
-	info        string
+	clipEncoder   *ort.DynamicAdvancedSession // CLIP-L/14
+	t5Encoder     *ort.DynamicAdvancedSession // T5-XXL
+	transformer   *ort.DynamicAdvancedSession // DiT 25-block
+	vaeDecoder    *ort.DynamicAdvancedSession
+	clipTokenizer *tokenizer.ClipTokenizer
+	t5Tokenizer   *tokenizer.T5Tokenizer
+	opts          engine.Options
+	modelDir      string
+	info          string
 }
 
 // Initialize loads ONNX sessions from modelDir.
@@ -74,6 +78,43 @@ func (e *Engine) Initialize(modelDir string, opts engine.Options) error {
 	}
 	_ = sessOpts.SetIntraOpNumThreads(threads)
 	_ = sessOpts.SetInterOpNumThreads(1)
+
+	switch strings.ToLower(opts.ExecutionProvider) {
+	case "rocm", "hip":
+		err = sessOpts.AppendExecutionProvider("ROCM", map[string]string{
+			"device_id": "0",
+		})
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append ROCm provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled ROCm GPU execution provider")
+		}
+	case "cuda":
+		cudaOpts, err := ort.NewCUDAProviderOptions()
+		if err == nil {
+			defer cudaOpts.Destroy()
+			err = sessOpts.AppendExecutionProviderCUDA(cudaOpts)
+		}
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append CUDA provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled CUDA GPU execution provider")
+		}
+	case "directml":
+		err = sessOpts.AppendExecutionProviderDirectML(0)
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append DirectML provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled DirectML GPU execution provider")
+		}
+	case "openvino":
+		err = sessOpts.AppendExecutionProviderOpenVINO(nil)
+		if err != nil {
+			fmt.Printf("[ort] Warning: failed to append OpenVINO provider: %v. Using CPU fallback.\n", err)
+		} else {
+			fmt.Println("[ort] Enabled OpenVINO execution provider")
+		}
+	}
 
 	load := func(name string) (*ort.DynamicAdvancedSession, error) {
 		path := filepath.Join(modelDir, name)
@@ -106,6 +147,15 @@ func (e *Engine) Initialize(modelDir string, opts engine.Options) error {
 	}
 	if e.vaeDecoder, err = load("vae_decoder.onnx"); err != nil {
 		return err
+	}
+
+	e.clipTokenizer, err = tokenizer.NewClipTokenizer(modelDir)
+	if err != nil {
+		return fmt.Errorf("clip tokenizer: %w", err)
+	}
+	e.t5Tokenizer, err = tokenizer.NewT5Tokenizer(modelDir)
+	if err != nil {
+		return fmt.Errorf("t5 tokenizer: %w", err)
 	}
 
 	e.info = fmt.Sprintf("Bonsai/FLUX MMDiT | dir=%s threads=%d provider=%s",
@@ -184,7 +234,7 @@ func (e *Engine) Close() error {
 // --- Pipeline internals ---
 
 func (e *Engine) encodeClip(prompt string) (seq []float32, pool []float32, err error) {
-	tokens := clipTokenize(prompt, 77)
+	tokens := e.clipTokenizer.Encode(prompt, 77)
 	inT, _ := ort.NewTensor(ort.NewShape(1, 77), tokens)
 	defer inT.Destroy()
 
@@ -206,8 +256,7 @@ func (e *Engine) encodeClip(prompt string) (seq []float32, pool []float32, err e
 }
 
 func (e *Engine) encodeT5(prompt string) ([]float32, error) {
-	// T5 uses int64 tokens, max length 256
-	tokens := t5Tokenize(prompt, 256)
+	tokens := e.t5Tokenizer.Encode(prompt, 256)
 	inT, _ := ort.NewTensor(ort.NewShape(1, 256), tokens)
 	defer inT.Destroy()
 

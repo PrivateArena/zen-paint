@@ -4,5 +4,6 @@
   "execution_provider": "cpu",
   "num_threads": 0,
   "output_dir": "/tmp/zen-paint",
-  "ort_lib_path": ""
+  "ort_lib_path": "",
+  "max_concurrency": 1
 }
